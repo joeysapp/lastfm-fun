@@ -3,13 +3,27 @@
             [clojure.data.csv :as csv]))
 (defn -main [& args])
 
-(defn take-csv [fname] (with-open [file (io/reader fname)] (doall (csv/read-csv file)))))
+;; This is "Eager", so we load it all into memory @ like, 2s.
+(defn take-csv [fname] (with-open [file (io/reader fname)] (doall (csv/read-csv file))))
+;(def hist ()) 
 (def hist (rest (take-csv "spotify-history-xl.csv"))) ; Jan 2014 to Dec 2021
 ;(def hist (rest (take-csv "spotify-history-sm.csv")))) ; 2000 scrobbles
 
-;; Lazy
-;; (defn take-csv [fname] (with-open [file (io/reader fname)] (csv/read-csv (slurp file))))
-;; (def hist (rest (take-csv "spotify-history-xl.csv"))) ; Jan 2014 to Dec 2021
+; https://clojuredocs.org/clojure.core/transduce
+;; Count our artists by plays, xl hist takes 175ms
+(transduce
+ (partition-by first)
+ (fn
+   ([] [])
+   ([acc] (nthrest (sort-by last acc) (- (count acc) 10))) ;; Return top 10 artists
+   ([acc e] (conj acc 
+                  {(first (first e))
+                   (+ (or
+                        (acc (first (first e))) ;; Increment existing playcount
+                        0)                      ;; Initialize new artist at + 0 1
+                      1)})))
+ {}
+hist)
 
 (defn get-artists []
   "Returns set of artists"
@@ -19,33 +33,11 @@
   "Returns ([plays]) by artist"
   (filter (fn [p] (= (first p) a)) hist))
 
-;; This is very slow. 
-;; - Is it okay being slow?
-;; - If is it something that can just stay loaded in, or do
-;; - we want to re-compute? (think in lists...)
-;; BENCHMARKING too
-; Get a map of {:artist play count} ;; {:Coldplay 420 :Washed Out 69}
-;; Non-lazy, 197 seconds... Lazy, 190 seconds
-(time (into {} (for [a (get-artists)] {(keyword a) (count (get-artist-plays a))})))
-
-(transduce
- (partition-by identity)
- (fn 
-   ([] []) ;; init - returns initial value for accumulator
-   ([acc] acc)    ;; completion - returns the final result, take the final accumulated value
-   ([acc e] (conj acc e)))    ;; step - returns accumulated state and takes accumulated state from before and new element
- '()
-[[1 "foo"] [2 "bar"] [3 "whee"] [1 "???"]])
-
-;; Experimenting
-(let [artists #{}]
-  (doseq [play hist, artist (first play)]
-    (if (nil? (artists artist))
-        (conj artists [(keyword artist) 0]) ;; this is not re-assigning back to artists. duh. lol.
-        (conj artists [(keyword artist) (+ (artists artist) 1)]))
-    artists))
-
 ;; Notes
+
+;; Lazy
+;; (defn take-csv [fname] (with-open [file (io/reader fname)] (csv/read-csv (slurp file))))
+;; (def hist (rest (take-csv "spotify-history-xl.csv"))) ; Jan 2014 to Dec 2021
 
 ;; https://clojuredocs.org/clojure.core/reduce  
 ;; (reduce
