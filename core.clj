@@ -8,14 +8,15 @@
 ;(def hist ()) 
 (def hist (rest (take-csv "spotify-history-xl.csv"))) ; Jan 2014 to Dec 2021
 ;(def hist (rest (take-csv "spotify-history-sm.csv")))) ; 2000 scrobbles
+(def playlist (rest (take-csv "boaty-playlist.csv")))
 
 ; https://clojuredocs.org/clojure.core/transduce
 ;; Count our artists by plays, xl hist takes 175ms
-(transduce
+(time (transduce
  (partition-by first)
  (fn
    ([] [])
-   ([acc] (nthrest (sort-by last acc) (- (count acc) 10))) ;; Return top 10 artists
+   ([acc] (nthrest (sort-by last acc) (- (count acc) 10))) ;; Return top 10 artists (~25ms)
    ([acc e] (conj acc 
                   {(first (first e))
                    (+ (or
@@ -23,7 +24,25 @@
                         0)                      ;; Initialize new artist at + 0 1
                       1)})))
  {}
-hist)
+hist))
+
+;; Using transient data structures
+;; xl hist takes 110ms
+(time 
+  (let [artists (persistent! (transduce
+   (partition-by first)
+   (fn
+     ([] [])
+     ([acc] acc)
+     ([acc e] (assoc! acc 
+                     (first (first e))
+                     (+
+                       (or (acc (first (first e))) 0)    
+                       1))))
+   (transient {})
+   hist))]
+  (prn (nthrest (sort-by last artists) (- (count artists) 10)))))
+
 
 (defn get-artists []
   "Returns set of artists"
