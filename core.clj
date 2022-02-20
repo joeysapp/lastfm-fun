@@ -3,50 +3,51 @@
             [clojure.data.csv :as csv]))
 (defn -main [& args])
 
-;; This is "Eager", so we load it all into memory @ like, 2s.
+;; This is eager, so we load it all into memory at around 2s
 (defn take-csv [fname] (with-open [file (io/reader fname)] (doall (csv/read-csv file))))
-;(def hist ()) 
 (def hist (rest (take-csv "spotify-history-xl.csv"))) ; Jan 2014 to Dec 2021
-;(def hist (rest (take-csv "spotify-history-sm.csv")))) ; 2000 scrobbles
-(def playlist (rest (take-csv "boaty-playlist.csv")))
+;(def hist (rest (take-csv "spotify-history-sm.csv"))) ; 2000 scrobbles
 
-; https://clojuredocs.org/clojure.core/transduce
-;; Count our artists by plays, xl hist takes 175ms
-(time (transduce
- (partition-by first)
- (fn
-   ([] [])
-   ([acc] (nthrest (sort-by last acc) (- (count acc) 10))) ;; Return top 10 artists (~25ms)
-   ([acc e] (conj acc 
-                  {(first (first e))
-                   (+ (or
-                        (acc (first (first e))) ;; Increment existing playcount
-                        0)                      ;; Initialize new artist at + 0 1
-                      1)})))
- {}
-hist))
+;(def playlist (rest (take-csv "boaty-playlist.csv")))
 
-;; Using transient data structures
-;; xl hist takes 110ms
-(time 
-  (let [artists (persistent! (transduce
-   (partition-by first)
-   (fn
-     ([] [])
-     ([acc] acc)
-     ([acc e] (assoc! acc 
-                     (first (first e))
-                     (+
-                       (or (acc (first (first e))) 0)    
-                       1))))
-   (transient {})
-   hist))]
-  (prn (nthrest (sort-by last artists) (- (count artists) 10)))))
+;; We've gone 300s -> 175ms -> 70ms. Faster possible?
+(defn get-artist-plays []
+  "Returns artists sorted descending by playcount 2015-2022"
+  (let [artists (persistent!
+                  (transduce
+                    identity
+                    (fn
+                      ([] [])
+                      ([acc] acc)
+                      ([acc [artist album track ts date]] (assoc! acc artist (+ 1 (or (acc artist) 0)))))
+                    (transient {})
+                    hist))]
+    artists))
 
+(def t (time (get-artist-plays)))
+;(def t (time (sort-by last (get-artist-plays)))) ; 65ms
 
+;; 90ms
 (defn get-artists []
   "Returns set of artists"
   (into #{} (for [p hist] (first p))))
+
+;; 60ms
+(defn get-artists []
+  (persistent! (transduce
+                (partition-by first)
+                (fn
+                  ([] [])
+                  ([acc] acc)
+                  ([acc [e [artist]]] (conj! acc artist)))
+                (transient #{})
+                hist)))
+
+;(defn get-artists []
+;  (persistent! (transduce
+;                (partition-by first)
+;                (transient #{})
+;                hist)))
 
 (defn get-artist-plays [a]
   "Returns ([plays]) by artist"
