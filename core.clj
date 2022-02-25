@@ -13,15 +13,41 @@
 ;; We've gone 300s -> 175ms -> 70ms. Faster possible?
 (defn get-artist-plays []
   "Returns artists sorted descending by playcount 2015-2022"
-  (let [artists (persistent!
-                  (transduce
-                    identity
-                    (fn
-                      ([] [])
-                      ([acc] acc)
-                      ([acc [artist album track ts date]] (assoc! acc artist (+ 1 (or (acc artist) 0)))))
-                    (transient {})
-                    hist))]
+  (let [artists (persistent! 
+                              ; persistent! is the last thing we call here, it'll be on the result of below
+                              ; Something in Clojure called "transient" data, when we start our transducing
+                              ; with a (transient {}), there is only ever one map in memory, instead of new
+                              ; accumulators/maps/etc. being created every loop in transducing.
+                              ; persistent! tells us the transient map is no longer transient, and we
+                              ; can use it as unmutable data then. (assigned it to artists, with let)
+                              ; 
+                              ; This is really cool, it's like pointer math with no work and was super easy.
+                              ; It took 175ms runtime down to 70ms for a 300k line csv
+
+                 (transduce   ; Transduce lets us create a HOF, basically. It starts with an empty vector [],
+                              ;   and we'll tell it what to add and how to add it
+
+                   identity   ; First, call identity on the element in the loop, starting kinda like
+                              ;     (source)                                (end)
+                              ;  1. [1, 2, 3, 4] -> identity -> function 
+                              ;                                 (called) -> []
+                              ;  2. [1, 2, 3, 4] -> identity -> function  
+                              ;                                 (called) -> [1], etc. 
+
+                   (fn        ; our anonymous fn that has 3 signatures
+                     ([] [])  
+                              ; first call, returns [] we'll be adding to
+                     ([acc] acc)
+                              ; last call, [accumlator-with-nothing-else], return the accumulator
+                     ([acc [artist album track ts date]]
+                              ; main calls, this is cool, [accumulator csv-line]
+                              ; and we destructure the csv values into a coll, this saved time actually
+                          (assoc! acc artist (+ 1 (or (acc artist) 0)))))
+                              ; assoc! is taking our accumulator, a map, and adding a kv pair { artist scrobbles }
+                              ; We get scrobbles from look at our accumulator map, see if the artist is in it, if it is
+                              ; place the kv pair in with an incremented number
+                   (transient {})
+                   hist))]
     artists))
 
 (def t (time (get-artist-plays)))
